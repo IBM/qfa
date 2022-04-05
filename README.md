@@ -1,5 +1,5 @@
 # QFA
-QFA, or quantile-frequency analysis, is a nonlinear spectral analysis method for time-series data. It is based on quantile periodograms computed from trigonometric quantile regression [1][2].
+QFA, or quantile-frequency analysis, is a nonlinear spectral analysis method for time-series data [1][2]. Based on quantile periodograms computed from trigonometric quantile regression, QFA is able to provide a richer view of time-series data than traditional power spectra and spectrograms. 
 
 This repo contains an R code (qfa_pfca_code.txt) for computing (a) quantile periodograms, (b) semiparametric estimates of quantile spectra [3][4], (c) functional principal component analysis (FPCA) of quantile periodograms, and (d) classification of time series using LDA, QDA, and SVM based on QFA-FPCA features [3]
 
