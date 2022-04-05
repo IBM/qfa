@@ -1,9 +1,9 @@
 # QFA
-QFA, or quantile-frequency analysis, is a nonlinear spectral analysis method for time-series data [1][2]. Based on quantile periodograms computed from trigonometric quantile regression, QFA is able to provide a richer view of time-series data than traditional power spectra and spectrograms. 
+QFA, or quantile-frequency analysis, is a nonlinear spectral analysis method for time-series data [1][2]. Based on quantile periodograms computed from trigonometric quantile regression, QFA, together with its extension called short-time QFA (STQFA), is able to provide a richer view of time-series data than traditional power spectra and spectrograms. 
 
 This repo contains an R code (qfa_pfca_code.txt) for computing (a) quantile periodograms, (b) semiparametric estimates of quantile spectra [3][4], (c) functional principal component analysis (FPCA) of quantile periodograms, and (d) classification of time series using LDA, QDA, and SVM based on QFA-FPCA features [3]
 
-This repo contains Python codes (QFA-DL-code.zip) for classification of time series using QFA Deep Learning (MLP and CNN) [5].
+This repo contains a Python code (QFA-DL-code.zip) for classification of time series using QFA and STQFA combined with Deep Learning (MLP and CNN) [5].
 
 This repo contains pre-calculated quantile periodograms (bond_disbond_qper_for_cnn.zip) and short-time quantile periodogram (bond_disbond_stqfa_for_cnn_15x45x29.zip) for classification of a set of nondestructive evaluation (NDE) signals available at https://www.math.umd.edu/~bnk/DATA/. It also contains traditional periodograms (bond_disbond_per_for_cnn.zip) and spectrograms (bond_disbond_stft_for_cnn_15x29.zip) of the NDE signals. These data were used in recent experiments [5].
 
