@@ -5,7 +5,7 @@ This repo contains an R code (qfa_pfca_code.txt) for computing (a) quantile peri
 
 This repo contains Python codes (QFA-DL-code.zip) for classification of time series using QFA Deep Learning (MLP and CNN) [5].
 
-This repo contains pre-calculated quantile periodograms (bond_disbond_qper_for_cnn.zip) and short-time quantile periodogram (bond_disbond_stqfa_for_cnn_15x45x29.zip) for classification of a set of nondestructive evaluation (NDE) signals available at https://www.math.umd.edu/~bnk/DATA/. It also contains traditional periodograms (bond_disbond_per_for_cnn.zip) and spectrograms (bond_disbond_stft_for_cnn_15x29.zip) for the NDE signals.
+This repo contains pre-calculated quantile periodograms (bond_disbond_qper_for_cnn.zip) and short-time quantile periodogram (bond_disbond_stqfa_for_cnn_15x45x29.zip) for classification of a set of nondestructive evaluation (NDE) signals available at https://www.math.umd.edu/~bnk/DATA/. It also contains traditional periodograms (bond_disbond_per_for_cnn.zip) and spectrograms (bond_disbond_stft_for_cnn_15x29.zip) of the NDE signals. These data were used in [5].
 
 References
 
