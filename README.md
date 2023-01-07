@@ -1,7 +1,9 @@
 # QFA
 QFA, or quantile-frequency analysis, is a nonlinear spectral analysis method for time-series data [1][2]. Based on quantile periodograms computed from trigonometric quantile regression, QFA, together with its extension called short-time QFA (STQFA), is able to provide a richer view of time-series data than traditional power spectra and spectrograms. 
 
-This repo contains an R code (qfa_pfca_code.txt) for computing (a) quantile periodograms, (b) semiparametric estimates of quantile spectra [3][4], (c) functional principal component analysis (FPCA) of quantile periodograms, and (d) classification of time series using LDA, QDA, and SVM based on QFA-FPCA features [3]
+This repo contains the installable R package qfa_1.2.tar.gz and the associated manual qfa_1.2.pdf.
+
+This repo contains an R code (qfa_fpca_code.txt) for functional principal component analysis (FPCA) of quantile periodograms, and classification of time series using LDA, QDA, and SVM based on QFA-FPCA features [3]
 
 This repo contains a Python code (QFA-DL-code.zip) for classification of time series using QFA and STQFA combined with Deep Learning (MLP and CNN) [5].
 
