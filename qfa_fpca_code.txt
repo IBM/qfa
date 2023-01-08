@@ -1,0 +1,375 @@
+#================================================================================
+#
+# R code for Quantile-Frequency Analysis (QFA):
+#   - compute quantile periodograms for time series data (multicore parallelization)
+#   - compute functional principal component analysis (FPCA) on quntile periodograms
+#   - classification of time series based on QFA-FPCA features (currently using classifiers LDA, QDA, and SVM)
+#  
+# Author: Ta-Hsin Li (thl@us.ibm.com)    10/20/2019; 1/7/2023
+#
+# References:
+#   Li, T.-H. (2012) Quantile periodograms, Journal of the American Statistical Association, 107(498): 765--776.
+#   Li, T.-H. (2020) From zero crossings to quantile-frequency analysis of time series with an application 
+#      to nondestructive evaluation, Applied Stochastic Models in Business and Industry, 36(6): 1111-1130.
+#
+# NDE data "1mm_bond.sig" and "1mm_disbond.sig" available at https://www.math.umd.edu/~bnk/DATA/
+#
+#=================================================================================
+
+# -- (1) load packages --
+
+library(quantreg)
+library(foreach) 
+library(doParallel)
+
+
+# -- (2) create required R functions --
+
+qper <- function(y,f,tau=0.5,intercept=T,type=2,weights=NULL,method="fn",n.cores=1,cl=NULL) {
+# computes quantile periodogram at given frequencies and quantile levels
+# type 1: squared L2 norm of coefficients
+# type 2: cost difference
+
+  rsoid2 <- function(n,f,a,b) {
+    p <- length(f)
+    tt <- c(1:n)
+    one <- rep(1,n)
+    tmp <- (one %o% a) * cos(2*pi*(tt %o% f)) + (one %o% b) * sin(2*pi*(tt %o% f))
+    tmp <- apply(tmp,1,sum)
+    tmp
+  }
+
+  lap.cost <- function(y,tau=0.5,weights=NULL) {
+  # cost function of quantile regression
+    n <- length(y)
+    if(is.null(weights)) weights <- rep(1,n)
+    tmp <- tau*y
+    sel <- which(y < 0)
+    if(length(sel) > 0) tmp[sel] <- (tau-1)*y[sel]
+    sum(tmp*weights,na.rm=T)
+  }
+
+  qh.parallel <- function(yy,ff,tau,tt,ns,weights,type) {
+  # parallel computation of trigonometric quantile regression 
+  # for a single value of tau and single value of ff
+  # used when intercept = F
+    if(ff == 0.5) {
+      fit <- try(quantreg::rq(yy ~ 0+cos(2*pi*ff*tt),method=method,tau=tau,weights=weights),silent=T)
+      if(length(fit) == 1) {
+        fit <- NULL
+        fit$coefficients <- c(0,0)
+      } else {
+        fit$coefficients <- c(fit$coefficients,0)
+      }
+    }
+    if(ff == 0) {
+      fit <- NULL
+      fit$coefficients <- c(0,0)
+    }
+    if(ff != 0.5 & ff > 0) {
+      fit <- try(quantreg::rq(yy ~ 0+cos(2*pi*ff*tt)+sin(2*pi*ff*tt),method=method,tau=tau,weights=weights),silent=T)
+      if(length(fit) == 1) {
+        fit <- NULL
+        fit$coefficients <- c(0,0)
+      }
+    }
+    fit$residuals <- yy - rsoid2(ns,ff,fit$coefficients[1],fit$coefficients[2])
+    if(type == 1) tmp.coef <- fit$coefficients
+    if(type == 2) tmp.cost <- lap.cost(fit$residuals,tau=tau,weights=weights)
+    rm(fit)
+    if(type == 1) return(tmp.coef)
+    if(type == 2) return(tmp.cost)
+  }
+
+  qh.parallel2 <- function(yy,ff,tau,tt,ns,weights,type) {
+  # parallel computation of quantile harmonic regression
+  # for a single value of frequency and a sequence of tau
+  # used when intercept = T
+    if(ff == 0.5) {
+      fit <- quantreg::rq(yy ~ cos(2*pi*ff*tt),method=method,tau=tau,weights=weights)
+      if(length(fit) == 1) {
+        fit <- NULL
+        fit$coefficients <- rbind(stats::quantile(yy,probs=tau),rep(0,length(tau)),rep(0,length(tau)))
+      } else {
+        fit$coefficients <- rbind(fit$coefficients,rep(0,length(tau)))
+      }
+    }
+    if(ff == 0) {
+      fit <- NULL
+      fit$coefficients <- rbind(stats::quantile(yy,probs=tau),rep(0,length(tau)),rep(0,length(tau)))
+    }
+    if(ff != 0.5 & ff > 0) {
+      fit <- try(quantreg::rq(yy ~ cos(2*pi*ff*tt)+sin(2*pi*ff*tt),method=method,tau=tau,weights=weights),silent=T)
+      if(length(fit) == 1) {
+        fit <- NULL
+        fit$coefficients <- rbind(stats::quantile(yy,probs=tau),rep(0,length(tau)),rep(0,length(tau)))
+      }
+    }
+    fit$coefficients <- matrix(fit$coefficients,ncol=length(tau))
+    if(type == 1) {
+       if(ff != 0.5) tmp.coef <- matrix(fit$coefficients[-1,],ncol=length(tau))
+       # rescale coef at freq 0.5
+       if(ff == 0.5) tmp.coef <- matrix(2*fit$coefficients[-1,],ncol=length(tau))
+    }
+    if(type == 2) {
+      if(length(tau) == 1) fit$coefficients <- matrix(fit$coefficients,ncol=1)
+      tmp.cost <- rep(NA,length(tau))
+      for(i.tau in c(1:length(tau))) {
+        tmp.resid <- yy - fit$coefficients[1,i.tau] - rsoid2(ns,ff,fit$coefficients[2,i.tau],fit$coefficients[3,i.tau])
+        tmp.cost[i.tau] <- lap.cost(tmp.resid,tau=tau[i.tau],weights=weights)
+      }
+      rm(tmp.resid)
+    }
+    rm(fit)
+    if(type == 1) return(tmp.coef)
+    if(type == 2) return(tmp.cost)
+  }
+
+  ns <- length(y)
+  nf <- length(f)
+  tt <- c(1:ns)
+  ntau <- length(tau)
+  keep.cl <- TRUE
+  if(n.cores>1 & is.null(cl)) {
+    cl <- parallel::makeCluster(n.cores)
+    parallel::clusterExport(cl, c("qr"))
+    doParallel::registerDoParallel(cl)
+    keep.cl <- FALSE
+  }
+  if(is.null(weights)) weights <- rep(1,ns)
+  `%dopar%` <- foreach::`%dopar%`
+  `%do%` <- foreach::`%do%`
+  yy <- y
+  if(intercept) {
+    if(type == 1) coef <- array(NA,dim=c(ntau,2,nf))
+    if(type == 2) { 
+      cost <- matrix(NA,ntau,nf)
+      fit <- quantreg::rq(yy ~ 1,method=method,tau=tau,weights=weights)
+      if(ntau == 1) fit$coefficients <- matrix(fit$coefficients,ncol=1)
+      cost0 <- rep(NA,ntau)
+      for(i.tau in c(1:ntau)) cost0[i.tau] <- lap.cost(yy - fit$coefficients[,i.tau],tau=tau[i.tau],weights=weights)
+    }
+    if(n.cores > 1) {
+      tmp <- foreach::foreach(i=1:nf) %dopar% { qh.parallel2(yy,f[i],tau=tau,tt,ns,weights,type) }
+    } else {
+      tmp <- foreach::foreach(i=1:nf) %do% { qh.parallel2(yy,f[i],tau=tau,tt,ns,weights,type) }
+    }
+    if(type == 1) {
+      out <- lapply(tmp,FUN=function(x) {apply(x^2,2,sum)})
+      out <- matrix(unlist(out),ncol=ntau,byrow=T)
+      out <- out*ns/4
+    }
+    if(type == 2) {
+      out <- matrix(unlist(tmp),ncol=ntau,byrow=T)
+      out <- matrix(rep(cost0,nf),ncol=ntau,byrow=T) - out
+    }
+  } else {
+    out <- NULL
+    for(i.tau in c(1:ntau)) {
+      if(type == 1) coef <- matrix(NA,ncol=2,nrow=nf)
+      if(type == 2) yy <- y - stats::quantile(y,probs=tau[i.tau],na.rm=T)
+      cost0 <- lap.cost(yy,tau=tau[i.tau],weights=weights)
+      if(n.cores > 1) {
+    	tmp <- foreach::foreach(i=1:nf) %dopar% { qh.parallel(yy,f[i],tau=tau[i.tau],tt,ns,weights,type) }
+      } else {
+    	tmp <- foreach::foreach(i=1:nf) %do% { qh.parallel(yy,f[i],tau=tau[i.tau],tt,ns,weights,type) }
+      }
+      if(type == 1) {
+        coef <- matrix(unlist(tmp),ncol=2,byrow=T)
+        out <- cbind(out,apply(coef^2,1,sum)*ns/4)
+      }
+      if(type == 2) {
+        cost <- c(unlist(tmp))
+        out <- cbind(out,cost0 - cost)
+      }
+    }
+  }
+  if(n.cores>1 & !keep.cl) {
+    parallel::stopCluster(cl)
+    cl <-NULL
+  }
+  out[out < 0] <- 0
+  if(ntau == 1) out <- c(out)
+  out
+}
+
+
+qper2vec <- function(data.qper,freqsel=NULL,tausel=NULL) {
+# flattens array of 2d qpers into column vectors
+  if(length(dim(data.qper))==3) {
+    if(is.null(freqsel)) freqsel<-c(1:dim(data.qper)[2])
+    if(is.null(tausel)) tausel<-c(1:dim(data.qper)[3])
+    apply(data.qper[,freqsel,tausel],1,function(y) {c(y)})
+  } else {
+    if(is.null(freqsel)) freqsel<-c(1:dim(data.qper)[1])
+    if(is.null(tausel)) tausel<-c(1:dim(data.qper)[2])
+    c(data.qper[freqsel,tausel])
+ }
+}
+
+pca.train<-function(data) {
+# data = nc-by-na matrix, where nc = number of cases, na = number of attributes
+  pca<-stats::prcomp(data)
+  pca
+}
+
+get.pca.features<-function(pca,data,pcsel=c(1:2)) {
+# pca = output from pca.train
+  features<-(data - pca$center) %*% pca$rotation[,pcsel]
+  features
+}
+
+classification.train<-function(data.train,meths=c('lda','qda','svm')) {
+##  allow multiple classifiers
+##  data.train = data.frame(y=label,x=feature)
+  fmla <- as.formula(paste("as.factor(y) ~ ",paste(colnames(data.train)[-1],collapse="+")))
+  accuracy<-NULL
+  fit<-list()
+  for(i in c(1:length(meths))) {
+    if(meths[i]=="qda") fit0<-try(MASS::qda(fmla, data = data.train),silent=T)  
+    if(meths[i]=="lda") fit0<-try(MASS::lda(fmla, data = data.train),silent=T)
+    if(meths[i]=="svm") fit0<-try(e1071::tune.svm(fmla,data = data.train,kernel='linear', cost = 10^(-3:2))$best.model,silent=T)
+    fit[[i]]<-fit0
+    tmp.accuracy<-NA
+    if(length(fit0) > 1) {
+      if(meths[i] == "svm") {
+        pred<-predict(fit0,data.train)
+      } else {
+        pred<-predict(fit0,data.train)$class
+      }
+      true<-data.train[,1]
+      tmp.accuracy<-mean(true == pred)
+    }
+    accuracy<-c(accuracy,tmp.accuracy)
+  }
+  return(list(fit=fit,accuracy=accuracy,meths=meths))
+}
+
+
+classification.predict<-function(fit.obj,data.new) {
+# fit.obj = output from classification.train()
+  pred<-NULL
+  accuracy<-NULL
+  for(i in c(1:length(fit.obj$meths))) {
+    fit <- fit.obj$fit[[i]]
+    tmp.pred<-rep(NA,nrow(data.new))
+    if(length(fit) > 1) {
+      if(fit.obj$meths[i] == 'svm') {
+        tmp.pred<-predict(fit,newdata=data.new)
+      } else {
+        tmp.pred<-predict(fit,newdata=data.new)$class
+      }
+    }
+    pred<-cbind(pred,tmp.pred)
+    if(!is.null(data.new$y)) {
+      tmp.accuracy = mean(tmp.pred == data.new$y)
+      accuracy = c(accuracy,tmp.accuracy)
+    }
+ }
+ colnames(pred)<-fit.obj$meths
+ return(list(pred=pred,accuracy=accuracy))
+}
+
+
+# -- (3) specify data directory --
+
+dir.d<-""
+##dir.r<-"c:/Home/thl/Res/cm/"
+##dir.d<-paste0(dir.r,"data/bond/")
+
+
+# -- (4) import NDE data --
+
+files<-c("1mm_bond.sig","1mm_disbond.sig")
+labels<-c("B","D")     # two classes of time series
+ms<-c(324,384)         # number of samples for each class
+ns<-c(258,258)         # length of time series in each class
+nc<-length(labels)     # number of classes
+
+data<-list()
+for(k in c(1:nc)) {
+  label<-labels[k]
+  m<-ms[k]
+  n<-ns[k]
+  filename<-files[k]
+  xx <- scan(paste0(dir.d,filename))
+  xx<-xx[-c(1,2)]
+  xx<-matrix(xx,nrow=n*2+1)
+  xx<-xx[-1,]
+  xx<-matrix(xx,ncol=2,byrow=T)
+  xx<-xx[,2]
+  xx<-matrix(xx,nrow=n)
+  xx<-apply(xx,2,function(x) { (x - mean(x))/sd(x) })
+  data[[k]]<-xx
+  rm(xx)
+}
+
+
+# -- (5) compute quantile periodograms (may take 9 minutes) --
+
+tau <- seq(0.06,0.94,0.02)  # quantile levels
+
+n.cores <- 12               # number of cores
+cl <- parallel::makeCluster(n.cores)
+parallel::clusterExport(cl, c("rq"))
+doParallel::registerDoParallel(cl)
+
+ptm <- proc.time()
+data.qper<-list()
+data.freq<-list()
+for(k in c(1:nc)) {
+  xx<-data[[k]]
+  m<-ncol(xx)
+  n<-nrow(xx)
+  freq<-c(1:(n-1))/n
+  freq<-freq[freq < 0.5]
+  spec<-array(NA,dim=c(m,dim=c(length(freq),length(tau))))
+  for(i in c(1:m)) {
+    spec[i,,]<-qper(xx[,i],freq,tau,n.cores=n.cores,cl=cl)
+  }
+  data.qper[[k]]<-spec
+  data.freq[[k]]<-freq
+  rm(xx,freq,spec)
+}
+proc.time()-ptm
+
+parallel::stopCluster(cl)
+
+
+
+# -- (6) classification based on FPCA of quantile periodograms --
+
+# create data matrix for pca: cases * attributes
+pca.data<-NULL
+for(k in c(1:nc)) pca.data<-rbind(pca.data,t(qper2vec(data.qper[[k]])))
+
+# create label vector
+pca.labels<-NULL
+for(k in c(1:nc)) pca.labels<-c(pca.labels,rep(k,dim(data.qper[[k]])[1]))
+
+# split pca.data into 70% train and 30% test
+idx.train<-sample(c(1:nrow(pca.data)),ceiling(0.7*nrow(pca.data)))
+
+# train pca
+pca<-pca.train(pca.data[idx.train,])
+
+# get pca features for train
+features.train<-get.pca.features(pca,pca.data[idx.train,],pcsel=c(1:2))
+# get labels for train
+labels.train<-pca.labels[idx.train]
+
+# train classifiers
+data.train<-data.frame(y=labels.train,x=features.train)
+fit<-classification.train(data.train,meths=c("lda","qda","svm"))
+fit$accuracy
+
+# get pca features for test
+features.test<-get.pca.features(pca,pca.data[-idx.train,],pcsel=c(1:2))
+# get labels for test
+labels.test<-pca.labels[-idx.train]
+
+# score test data
+data.test<-data.frame(y=labels.test,x=features.test)
+result<-classification.predict(fit,data.test)
+result$accuracy
+
