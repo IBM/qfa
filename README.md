@@ -11,7 +11,7 @@ This repo contains pre-calculated quantile periodograms (bond_disbond_qper_for_c
 
 References
 
-[1] T.-H. Li (2008), "Laplace periodogram for time series analysis," Journal of the American Statistical Association, 103:482, 757-768.
+[1] T.-H. Li (2008), "Laplace periodogram for time series analysis," Journal of the American Statistical Association, 103:482, 757-768. https://doi.org/10.1198/016214508000000265
 
 [2] T.-H. Li (2012), "Quantile periodograms", Journal of the American Statistical Association, 107:498, 765-776. http://dx.doi.org/10.1080/01621459.2012.682815
 
